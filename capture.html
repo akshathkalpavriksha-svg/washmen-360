@@ -1,0 +1,172 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Washmen 360 Capture</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 14px; }
+    video, canvas { width: 100%; max-width: 520px; border-radius: 12px; background:#000; }
+    button, input, select { font-size: 16px; padding: 10px; margin: 6px 0; width: 100%; max-width: 520px; }
+    .row { max-width: 520px; }
+    .small { font-size: 13px; color:#444; }
+    .badge { display:inline-block; padding:3px 8px; border-radius: 10px; background:#eee; margin-left:6px; }
+  </style>
+</head>
+<body>
+  <h2>Washmen Shoecare – 360 Capture</h2>
+
+  <div class="row">
+    <label>Mode</label>
+    <select id="mode">
+      <option value="before">Before</option>
+      <option value="after">After</option>
+    </select>
+
+    <label>Frames</label>
+    <select id="frames">
+      <option value="36">36 (recommended)</option>
+      <option value="48">48</option>
+      <option value="72">72 (smoother)</option>
+    </select>
+
+    <label>Interval (seconds)</label>
+    <input id="interval" type="number" min="0.1" step="0.1" value="0.3"/>
+
+    <button id="startCam">1) Start Camera</button>
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <button id="startCap" disabled>2) Start Auto Capture</button>
+    <button id="stopCap" disabled>Stop</button>
+
+    <p class="small">
+      Tip: Keep phone fixed. Start capture, then let the shoe complete exactly 1 full rotation during capture.
+      <span class="badge" id="status">Idle</span>
+    </p>
+
+    <button id="download" disabled>3) Download Images (ZIP)</button>
+    <p class="small" id="countInfo"></p>
+  </div>
+
+  <!-- JSZip (free) -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    const countInfo = document.getElementById('countInfo');
+
+    const startCamBtn = document.getElementById('startCam');
+    const startCapBtn = document.getElementById('startCap');
+    const stopCapBtn = document.getElementById('stopCap');
+    const downloadBtn = document.getElementById('download');
+
+    const modeEl = document.getElementById('mode');
+    const framesEl = document.getElementById('frames');
+    const intervalEl = document.getElementById('interval');
+
+    let stream = null;
+    let timer = null;
+    let shots = [];
+    let shotIndex = 0;
+
+    function setStatus(txt){ statusEl.textContent = txt; }
+    function updateCount(){
+      countInfo.textContent = `Captured: ${shots.length} frame(s)`;
+    }
+
+    startCamBtn.onclick = async () => {
+      try {
+        setStatus('Starting camera…');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "rear" },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        setStatus('Camera ready');
+        startCapBtn.disabled = false;
+      } catch (e) {
+        setStatus('Camera error');
+        alert('Camera access failed. Make sure you opened this page over HTTPS (GitHub Pages).');
+      }
+    };
+
+    startCapBtn.onclick = () => {
+      const total = parseInt(framesEl.value, 10);
+      const interval = Math.max(0.1, parseFloat(intervalEl.value || '0.3')) * 1000;
+      const mode = modeEl.value;
+
+      if (!stream) return alert('Start camera first.');
+
+      shots = [];
+      shotIndex = 0;
+      updateCount();
+
+      startCapBtn.disabled = true;
+      stopCapBtn.disabled = false;
+      downloadBtn.disabled = true;
+
+      setStatus('Capturing…');
+
+      timer = setInterval(() => {
+        if (shotIndex >= total) {
+          clearInterval(timer);
+          timer = null;
+          setStatus('Done');
+          stopCapBtn.disabled = true;
+          downloadBtn.disabled = false;
+          startCapBtn.disabled = false;
+          return;
+        }
+
+        // capture frame
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+
+        canvas.toBlob((blob) => {
+          shots.push({ blob, name: `${mode}_${String(shotIndex+1).padStart(4,'0')}.jpg` });
+          shotIndex++;
+          updateCount();
+        }, 'image/jpeg', 0.92);
+
+      }, interval);
+    };
+
+    stopCapBtn.onclick = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      setStatus('Stopped');
+      stopCapBtn.disabled = true;
+      startCapBtn.disabled = false;
+      downloadBtn.disabled = shots.length === 0;
+    };
+
+    downloadBtn.onclick = async () => {
+      if (shots.length === 0) return;
+
+      setStatus('Zipping…');
+      const zip = new JSZip();
+      const folder = zip.folder(modeEl.value);
+
+      for (const s of shots) {
+        folder.file(s.name, s.blob);
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(content);
+      a.download = `washmen_360_${modeEl.value}.zip`;
+      a.click();
+
+      setStatus('Downloaded');
+    };
+  </script>
+</body>
+</html>
